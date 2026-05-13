@@ -1,4 +1,4 @@
-import os, json
+import os, json, httpx
 from typing import Any, cast
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -123,7 +123,6 @@ async def analyze_fast(payload: FastAnalysisPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/analyze-vision")
 async def analyze_vision(payload: VisionAnalysisPayload):
     """Chains a 3rd-party vision API with Cerebras financial synthesis."""
@@ -162,3 +161,49 @@ async def analyze_vision(payload: VisionAnalysisPayload):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/market-prices")
+async def get_market_prices():
+    """
+    Fetches live market prices from an external data source.
+    Falls back to safe baseline prices if the external fetch fails.
+    """
+    external_api_url = "https://gist.githubusercontent.com/Meta-Dusk/93498e14578f6ca4bd8f123de81c82c0/raw/8fc7836a51c4cda578325ee6adee700e00c7eaa9/market_prices.json"
+    
+    fallback_data = {
+        "palay_fresh_kg": 19.00,
+        "palay_dry_kg": 23.50,
+        "urea_46_0_0_bag": 1150.00,
+        "solophos_0_18_0_bag": 950.00,
+        "mop_0_0_60_bag": 1050.00
+    }
+
+    try:
+        # Fetch the live data asynchronously
+        async with httpx.AsyncClient() as client:
+            response = await client.get(external_api_url, timeout=5.0)
+            
+            if response.status_code == 200:
+                live_data = response.json()
+                
+                # Extract the timestamp so we don't pass it into the raw data dictionary
+                timestamp = live_data.pop("timestamp", "Live") 
+                
+                return {
+                    "success": True,
+                    "currency": "PHP",
+                    "data": live_data,
+                    "source": "Live Market API",
+                    "timestamp": timestamp
+                }
+    except Exception as e:
+        print(f"Failed to fetch live prices: {e}")
+        
+    # If the request fails, times out, or returns a 404, seamlessly fallback
+    return {
+        "success": True,
+        "currency": "PHP",
+        "data": fallback_data,
+        "source": "DA Bantay Presyo (Cached Fallback)",
+        "timestamp": "Fallback"
+    }

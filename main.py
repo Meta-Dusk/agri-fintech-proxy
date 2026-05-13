@@ -41,6 +41,33 @@ def extract_message_content(response: Any) -> str:
     except (IndexError, AttributeError) as e:
         raise ValueError(f"Unexpected response structure: {str(e)}")
 
+def parse_ai_json(content: str, fallback_score: int) -> dict:
+    """
+    Parses the AI's JSON string, strips markdown, and uses fuzzy matching 
+    to ensure 'financial_assessment' and 'crop_score' are always returned.
+    """
+    try:
+        clean_content = content.replace("```json", "").replace("```", "").strip()
+        ai_data = json.loads(clean_content)
+        
+        # Fuzzy match strings for the assessment
+        if "financial_assessment" not in ai_data:
+            string_values = [str(v) for k, v in ai_data.items() if isinstance(v, str)]
+            ai_data["financial_assessment"] = "\n\n".join(string_values) if string_values else clean_content
+            
+        # Fuzzy match integers for the score
+        if "crop_score" not in ai_data:
+            num_values = [int(v) for k, v in ai_data.items() if isinstance(v, (int, float))]
+            ai_data["crop_score"] = num_values[0] if num_values else fallback_score
+
+        return ai_data
+        
+    except json.JSONDecodeError:
+        # Safe fallback if the AI ignores the JSON command entirely
+        return {
+            "financial_assessment": content,
+            "crop_score": fallback_score
+        }
 
 # --- ENDPOINTS ---
 @app.get("/")
@@ -54,16 +81,15 @@ def health_check() -> dict[str, str]:
 
 @app.post("/analyze-fast")
 async def analyze_fast(payload: FastAnalysisPayload):
-    """
-    Handles High-Confidence local scans and Fast Triage choices.
-    Converts raw color data into a Financial Risk & Crop Health Score.
-    """
+    """Handles High-Confidence local scans and Fast Triage choices."""
     system_prompt = (
         "You are an expert agricultural-fintech risk assessor in the Philippines. "
         "Analyze the provided local diagnosis and crop color distribution data. "
-        "Output a concise evaluation containing: 1) A 'Crop Health Score' (0-100), "
-        "2) A financial yield risk prediction, and 3) A micro-loan/fertilizer recommendation "
-        "to satisfy SDG 1 & 8 goals. Keep it under 4 sentences."
+        "You MUST respond ONLY with a valid JSON object. Do not include markdown or extra text. "
+        "The JSON must strictly contain these two keys: "
+        "1) 'financial_assessment': A concise string (under 4 sentences) detailing the yield risk prediction "
+        "and a micro-loan/fertilizer recommendation to satisfy SDG 1 & 8. "
+        "2) 'crop_score': An integer from 0 to 100 representing the current plant health."
     )
     
     user_prompt = (
@@ -80,29 +106,18 @@ async def analyze_fast(payload: FastAnalysisPayload):
             ],
             model="llama3.1-8b",
             stream=False,
-            response_format={"type": "json_object"},
+            response_format={"type": "json_object"}, 
             max_completion_tokens=150,
             temperature=0.2
         )
         
         content = extract_message_content(response)
-        
-        # Safely parse the JSON string returned by the AI
-        try:
-            # Strip any accidental markdown formatting the LLM might include
-            clean_content = content.replace("```json", "").replace("```", "").strip()
-            ai_data = json.loads(clean_content)
-        except json.JSONDecodeError:
-            # Safe fallback if the AI ignores the JSON command
-            ai_data = {
-                "financial_assessment": content,
-                "crop_score": payload.confidence # Default to local confidence if AI fails
-            }
+        ai_data = parse_ai_json(content, fallback_score=payload.confidence)
         
         return {
             "success": True,
             "financial_assessment": ai_data.get("financial_assessment", "Error generating assessment."),
-            "crop_score": ai_data.get("crop_score", 0),
+            "crop_score": ai_data.get("crop_score", payload.confidence),
             "sdg_alignment": ["SDG 1", "SDG 8", "SDG 10"]
         }
     except Exception as e:
@@ -111,11 +126,7 @@ async def analyze_fast(payload: FastAnalysisPayload):
 
 @app.post("/analyze-vision")
 async def analyze_vision(payload: VisionAnalysisPayload):
-    """
-    Handles the Deep Vision Verification choice.
-    Chains a 3rd-party vision API with Cerebras financial synthesis.
-    """
-    # Mocking the vision API return for now
+    """Chains a 3rd-party vision API with Cerebras financial synthesis."""
     mock_vision_data = "Vision API confirms leaf presence. High marginal necrosis detected."
     
     system_prompt = (
@@ -140,20 +151,12 @@ async def analyze_vision(payload: VisionAnalysisPayload):
         )
         
         content = extract_message_content(response)
-        
-        try:
-            clean_content = content.replace("```json", "").replace("```", "").strip()
-            ai_data = json.loads(clean_content)
-        except json.JSONDecodeError:
-            ai_data = {
-                "financial_assessment": content,
-                "crop_score": 50
-            }
+        ai_data = parse_ai_json(content, fallback_score=50)
         
         return {
             "success": True,
             "financial_assessment": ai_data.get("financial_assessment", "Error generating assessment."),
-            "crop_score": ai_data.get("crop_score", 0),
+            "crop_score": ai_data.get("crop_score", 50),
             "sdg_alignment": ["SDG 1", "SDG 8", "SDG 10"],
             "vision_verified": True
         }

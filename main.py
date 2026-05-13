@@ -1,4 +1,4 @@
-import os
+import os, json
 from typing import Any, cast
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -45,11 +45,12 @@ def extract_message_content(response: Any) -> str:
 # --- ENDPOINTS ---
 @app.get("/")
 @app.head("/")
-async def health_check():
-    """
-    Root endpoint for UptimeRobot to ping and keep the Render instance awake.
-    """
-    return {"status": "awake", "service": "Agri-FinTech Proxy"}
+def health_check() -> dict[str, str]:
+    """A simple ping endpoint to check if the server is awake."""
+    return {
+        "status": "Online",
+        "message": "The Agri-Fintech Proxy is awake and ready!"
+    }
 
 @app.post("/analyze-fast")
 async def analyze_fast(payload: FastAnalysisPayload):
@@ -78,16 +79,30 @@ async def analyze_fast(payload: FastAnalysisPayload):
                 {"role": "user", "content": user_prompt}
             ],
             model="llama3.1-8b",
-            stream=False, # Explicitly disable streaming for the type checker
+            stream=False,
+            response_format={"type": "json_object"},
             max_completion_tokens=150,
             temperature=0.2
         )
         
         content = extract_message_content(response)
         
+        # Safely parse the JSON string returned by the AI
+        try:
+            # Strip any accidental markdown formatting the LLM might include
+            clean_content = content.replace("```json", "").replace("```", "").strip()
+            ai_data = json.loads(clean_content)
+        except json.JSONDecodeError:
+            # Safe fallback if the AI ignores the JSON command
+            ai_data = {
+                "financial_assessment": content,
+                "crop_score": payload.confidence # Default to local confidence if AI fails
+            }
+        
         return {
             "success": True,
-            "financial_assessment": content,
+            "financial_assessment": ai_data.get("financial_assessment", "Error generating assessment."),
+            "crop_score": ai_data.get("crop_score", 0),
             "sdg_alignment": ["SDG 1", "SDG 8", "SDG 10"]
         }
     except Exception as e:
@@ -100,30 +115,45 @@ async def analyze_vision(payload: VisionAnalysisPayload):
     Handles the Deep Vision Verification choice.
     Chains a 3rd-party vision API with Cerebras financial synthesis.
     """
-    # TODO: Implement httpx call to your chosen 3rd-party vision API here
-    # vision_result = await fetch_vision_data(payload.image_base64)
-    
     # Mocking the vision API return for now
     mock_vision_data = "Vision API confirms leaf presence. High marginal necrosis detected."
     
+    system_prompt = (
+        "You are an expert agricultural-fintech risk assessor. "
+        "You are evaluating 3rd-party vision data for crop loans. "
+        "You MUST respond ONLY with a valid JSON object containing exactly two keys: "
+        "1) 'financial_assessment': A concise risk string. "
+        "2) 'crop_score': An integer from 0 to 100 representing the plant health."
+    )
+
     try:
         response = client.chat.completions.create(
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a financial risk assessor evaluating 3rd-party vision data for crop loans..."
-                },
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": mock_vision_data}
             ],
-            model="llama3.3-70b",
+            model="llama3.1-8b",
             stream=False,
+            response_format={"type": "json_object"},
+            max_completion_tokens=150,
+            temperature=0.2
         )
         
         content = extract_message_content(response)
         
+        try:
+            clean_content = content.replace("```json", "").replace("```", "").strip()
+            ai_data = json.loads(clean_content)
+        except json.JSONDecodeError:
+            ai_data = {
+                "financial_assessment": content,
+                "crop_score": 50
+            }
+        
         return {
             "success": True,
-            "financial_assessment": content,
+            "financial_assessment": ai_data.get("financial_assessment", "Error generating assessment."),
+            "crop_score": ai_data.get("crop_score", 0),
             "sdg_alignment": ["SDG 1", "SDG 8", "SDG 10"],
             "vision_verified": True
         }

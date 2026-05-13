@@ -76,8 +76,10 @@ async def analyze_fast(payload: FastAnalysisPayload):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            model="llama3.3-70b",
+            model="llama3.1-8b",
             stream=False, # Explicitly disable streaming for the type checker
+            max_completion_tokens=150,
+            temperature=0.2
         )
         
         content = extract_message_content(response)

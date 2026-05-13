@@ -44,6 +44,7 @@ def extract_message_content(response: Any) -> str:
 
 # --- ENDPOINTS ---
 @app.get("/")
+@app.head("/")
 async def health_check():
     """
     Root endpoint for UptimeRobot to ping and keep the Render instance awake.

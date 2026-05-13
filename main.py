@@ -43,6 +43,13 @@ def extract_message_content(response: Any) -> str:
 
 
 # --- ENDPOINTS ---
+@app.get("/")
+async def health_check():
+    """
+    Root endpoint for UptimeRobot to ping and keep the Render instance awake.
+    """
+    return {"status": "awake", "service": "Agri-FinTech Proxy"}
+
 @app.post("/analyze-fast")
 async def analyze_fast(payload: FastAnalysisPayload):
     """
